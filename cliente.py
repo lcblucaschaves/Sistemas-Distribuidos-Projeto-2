@@ -24,6 +24,8 @@ class Cliente:
         self.port = int (port)
         self.servidores = []
         self.rngServ = 0        
+        self.clientTS = 0
+        self.chavesTS = []
     
     def INIT(self):
         for i in range(0, 3):
@@ -44,7 +46,7 @@ class Cliente:
     
     def PUT(self, chave, valor):
         try:            
-            msg_aux = Mensagem("PUT", chave, valor, "0")
+            msg_aux = Mensagem("PUT", chave, valor, self.clientTS)
             msg = json.dumps(msg_aux.__dict__)            
             
             self.cliente.send(msg.encode())
@@ -52,30 +54,44 @@ class Cliente:
             resp = json.loads(resp_aux)
             
             if resp["requisicao"] == "PUT_OK":
-                print (f"PUT_OK key: [{resp['chave']}] value: [{resp['valor']}] timestamp: [{resp['timestamp']}] realizada no servidor [{self.servidores[self.rngServ][0]}:{self.servidores[self.rngServ][1]}]")
+                print (f"\nPUT_OK key: [{resp['chave']}] value: [{resp['valor']}] timestamp: [{resp['timestamp']}] realizada no servidor [{self.servidores[self.rngServ][0]}:{self.servidores[self.rngServ][1]}]")
+                
+                dado = [resp['chave'], resp['timestamp']]
+                self.chavesTS.append(dado)
+            
             else:
-                print (f"PUT_ERROR key: [{resp['chave']}] value: [{resp['valor']}] timestamp: [{resp['timestamp']}] realizada no servidor [{self.servidores[self.rngServ][0]}:{self.servidores[self.rngServ][1]}]")
+                print (f"\nPUT_ERROR key: [{resp['chave']}] value: [{resp['valor']}] timestamp: [{resp['timestamp']}] realizada no servidor [{self.servidores[self.rngServ][0]}:{self.servidores[self.rngServ][1]}]")
             
             self.cliente.shutdown(socket.SHUT_RDWR)
             self.cliente.close()
+            
+            self.clientTS = self.clientTS + 1
                         
         except socket.error as e: #Tratamento de erros
             print (f"erro {e}")
     
     def GET(self, key):
         try:            
-            msg_aux = Mensagem("GET", key, "NULL", "0")
-            msg = json.dumps(msg_aux.__dict__)    
+            msg_aux = Mensagem("GET", key, "NULL", "0")            
+            for item in self.chavesTS:
+                if item[0] == key:
+                    msg_aux = Mensagem("GET", item[0], "NULL", item[1])
             
+            msg = json.dumps(msg_aux.__dict__)            
             self.cliente.send(msg.encode())
+            
             resp_aux = self.cliente.recv(1024).decode()
             resp = json.loads(resp_aux)
             
             if resp["requisicao"] == "GET_ERROR":
-                print ("TRY_OTHER_SERVER_OR_LATER")
+                print ("\nTRY_OTHER_SERVER_OR_LATER")
             else: 
-                print (f"GET key: [{key}] value: [{resp['valor']}] obtido do servidor [{self.servidores[self.rngServ][0]}:{self.servidores[self.rngServ][1]}], meu timestamp [{resp['timestamp']}] e do servidor [{resp['timestamp']}]")
-            
+                print (f"\nGET key: [{key}] value: [{resp['valor']}] obtido do servidor [{self.servidores[self.rngServ][0]}:{self.servidores[self.rngServ][1]}], meu timestamp [{msg_aux.timestamp}] e do servidor [{resp['timestamp']}]")
+                
+                if resp["valor"] != "NULL":
+                    dado = [resp['chave'], resp['timestamp']]
+                    self.chavesTS.append(dado)
+                
             self.cliente.shutdown(socket.SHUT_RDWR)
             self.cliente.close()
                         

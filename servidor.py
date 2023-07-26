@@ -8,6 +8,7 @@ Created on Tue Jul 18 08:46:25 2023
 import socket
 import threading
 import json
+import time
 
 class Mensagem:
     def __init__(self, requisicao, chave, valor, timestamp):
@@ -24,9 +25,10 @@ class Servidor:
         self.port = int (port)
         self.liderHost = liderHost
         self.liderPort = int (liderPort)
-        self.baseDeDados = []
+        self.baseDeDados = [["0", "Teste", "-1"]]
         self.listaServidores = [10097,10098,10099]
         self.listaServidores.remove(self.port)
+        self.serverTS = 0
         
         if (self.liderHost == self.host) and (self.liderPort == self.port):
             self.souLider = True
@@ -79,17 +81,13 @@ class Servidor:
         return
     
     def atualizaBase(self, chave, valor, timestamp):
-        chaveExiste = False 
         for item in self.baseDeDados:
             if item[0] == chave:
-                chaveExiste = True
                 item[1] = valor
                 item[2] = timestamp
                 return               
-        
-        if not chaveExiste:
-            dado = [chave, valor, timestamp]
-            self.baseDeDados.append(dado)
+        dado = [chave, valor, timestamp]
+        self.baseDeDados.append(dado)
             
     def buscaBase(self, chave, timestamp):
         for item in self.baseDeDados:
@@ -100,7 +98,7 @@ class Servidor:
     def PUT(self, conexao, addr, req): 
         if self.souLider:
             msg = json.loads(req)
-            self.atualizaBase(msg["chave"], msg["valor"], msg["timestamp"])            
+            self.atualizaBase(msg["chave"], msg["valor"], self.serverTS)
             try:
                 servidor1 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 servidor2 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -115,7 +113,7 @@ class Servidor:
                 servidor2.send(port.encode())
                 servidor2.recv(1024)
                 
-                msg_server_aux = Mensagem("REPLICATION", msg["chave"], msg["valor"], msg["timestamp"])
+                msg_server_aux = Mensagem("REPLICATION", msg["chave"], msg["valor"], self.serverTS)
                 msg_server = json.dumps(msg_server_aux.__dict__)
                 
                 servidor1.send(msg_server.encode())
@@ -128,7 +126,7 @@ class Servidor:
                 s2 = json.loads(s2_aux)
                 
                 if s1["requisicao"] == "REPLICATION_OK" and s2["requisicao"] == "REPLICATION_OK":
-                    print (f"Enviando PUT_OK ao Cliente [{addr[0]}]:[{addr[1]}] da key: [{msg['chave']}] ts: [{msg['timestamp']}]")
+                    print (f"Enviando PUT_OK ao Cliente [{addr[0]}]:[{addr[1]}] da key: [{msg['chave']}] ts: [{self.serverTS}]")
                     msg_aux = Mensagem("PUT_OK", msg["chave"], msg["valor"], msg["timestamp"])
                 else:
                     msg_aux = Mensagem("PUT_ERROR", msg["chave"], msg["valor"], msg["timestamp"])
@@ -138,6 +136,9 @@ class Servidor:
                 
                 servidor1.close()
                 servidor2.close()
+                
+                self.serverTS = self.serverTS + 1
+                
             except socket.error as e: #Tratamento de erros
                 print (f"erro {e}")
             
@@ -155,12 +156,18 @@ class Servidor:
                     
     def REPLICATION(self, conexaoServidor, msg):
         try:           
+            #gera latencia
+            for i in range(0,4):
+                time.sleep(2)
+            
             self.atualizaBase(msg["chave"], msg["valor"], msg["timestamp"])
             
             msg_aux = Mensagem("REPLICATION_OK", msg["chave"], msg["valor"], msg["timestamp"])
             resp = json.dumps(msg_aux.__dict__)     
             
             conexaoServidor.send(resp.encode())
+            
+            self.serverTS = self.serverTS + 1
         except socket.error as e: #Tratamento de erros
             print (f"erro {e}")
             
@@ -169,13 +176,16 @@ class Servidor:
             item = self.buscaBase(msg["chave"], msg["timestamp"])
             
             if len (item) != 0:
-                msg_aux = Mensagem("GET_OK", item[0], item[1], item[2])
+                if int(item[2]) < int(msg["timestamp"]):
+                    msg_aux = Mensagem("GET_ERROR", item[0], "TRY_OTHER_SERVER_OR_LATER", item[2]) 
+                else:
+                    msg_aux = Mensagem("GET_OK", item[0], item[1], item[2])
             else:
-                msg_aux = Mensagem("GET_NULL", "NULL", "NULL", msg["timestamp"])
+                msg_aux = Mensagem("GET_NULL", "NULL", "NULL", "0")
             
             
             resp = json.dumps(msg_aux.__dict__)
-            print (f"Cliente [{addr[0]}]:[{addr[1]}] GET key: [{msg['chave']}] ts: [{msg['timestamp']}]. Meu ts é [ts server], portanto devolvendo [{msg_aux.valor}]")
+            print (f"Cliente [{addr[0]}]:[{addr[1]}] GET key: [{msg['chave']}] ts: [{msg['timestamp']}]. Meu ts é [{msg_aux.timestamp}], portanto devolvendo [{msg_aux.valor}]")
             conexao.send(resp.encode())
         except socket.error as e: #Tratamento de erros
             print (f"GET erro {e}")
